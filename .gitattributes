@@ -1,0 +1,33 @@
+# Using a per repository gitattributes file to facilitate collaboration
+# through consistent handling of line endings. See:
+# https://help.github.com/articles/dealing-with-line-endings/#per-repository-settings
+
+# Set default behaviour, in case users don't have core.autocrlf set.
+* text=auto
+
+# Explicitly declare text files we want to always be normalized and converted
+# to native line endings on checkout.
+*.txt text
+*.py text
+*.xml text
+*.name text
+*.ids text
+*.iml text
+*.css text
+*.js text
+*.less text
+.scsss text
+*.html text
+.gitattributes text
+
+# Declare files that will always have CRLF line endings on checkout, even on OSX or Linux
+*.sln text eol=crlf
+
+# Files that must keep LF endings, even on Windows
+*.svg eol=lf
+
+# Denote all files that are truly binary and should not be modified.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
