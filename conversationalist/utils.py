@@ -1,27 +1,20 @@
 import base64
+import collections
 import json
-import re
 import os
-import time
-from datetime import datetime, timedelta
-from operator import itemgetter
+from datetime import datetime
 from jinja2 import Environment, FileSystemLoader
 import tweepy
 import pytz
 from dateutil.parser import parse
-from .classes import Timeline, TimelineEncoder, Conversation
+from .classes import Conversation, Timeline, TimelineEncoder
 
-
-DT_FORMAT = '%B-%d-%Y-%I-%p'
-VIEW_DT_FORMAT = '%B %d, %Y %I:%M %p'
-BLOCK_DT_FORMAT = '%A, %B %d, %Y  %-I%p'
-#ISO_WITH_OFFSET_DT_FORMAT = ''
 
 template_path = ''.join((os.path.dirname(os.path.abspath(__file__)), '/templates',))
-env = Environment(loader=FileSystemLoader(template_path))
+template_env = Environment(loader=FileSystemLoader(template_path))
 
 
-def format_datetime(value, pattern=VIEW_DT_FORMAT):
+def format_datetime(value, pattern='%B %d, %Y %I:%M %p'):
     return parse(value).strftime(pattern)
 
 
@@ -35,84 +28,33 @@ def urlize_item_link(value):
     return urlized.lower()
 
 
-env.filters['datetime'] = format_datetime
-env.filters['urlize_item_link'] = urlize_item_link
-env.filters['to_background_url'] = to_background_url
+template_env.filters['datetime'] = format_datetime
+template_env.filters['urlize_item_link'] = urlize_item_link
+template_env.filters['to_background_url'] = to_background_url
 
 
-def write_story(path, title, summaries, participants, navs, template):
+def write_story(path, conversation, template):
     """
 
     Args:
         path:
-        title:
-        summaries:
-        participants:
-        navs:
+        conversation: A ``~.classes.Conversation`` instance.
         template: For example, 'tick_tock_body.html'
     """
-    template = env.get_template(template)
-    output = template.render(title=title, summaries=summaries, participants=participants, nav_links=navs)
+    title = conversation.data['title'],
+    summaries = conversation.data['hourlies'],
+    participants = conversation.participation.get_ranked_profiles(),
+    navs = conversation.nav,
+    template = template_env.get_template(template)
+    output = template.render(title=title, summaries=summaries,
+                             participants=participants, nav_links=navs)
     with open(path, "wb") as fh:
         fh.write(output)
 
 
-def prepare_hourly_dict(start_dt, cutoff_dt):
-    hd = {}
-    start_dt.replace(minute=0)
-    active_dt = cutoff_dt
-    while active_dt < start_dt:
-        hourly_key = active_dt.strftime(DT_FORMAT)
-        #print 'Preparing key ' + hourly_key
-        hd[hourly_key] = []
-        active_dt = active_dt + timedelta(hours=1)
-    return hd
-
-
-def generate_hourly_summaries(hourly_dict):
-    time_blocks = []
-    for k, v in hourly_dict.items():
-        struct_time = time.strptime(k, DT_FORMAT)
-        seconds = time.mktime(struct_time)
-        time_zone = pytz.timezone('America/Chicago')
-        dt = datetime.fromtimestamp(time.mktime(struct_time), time_zone)
-        subtitle = dt.strftime(BLOCK_DT_FORMAT)
-        empty = True
-        if len(v) > 0:
-            empty = False
-            message = 'No updates.'
-            hour_block = {
-                'id': seconds,
-                'empty': empty,
-                'empty_message': message,
-                'subtitle': subtitle,
-                'statuses': v
-            }
-            time_blocks.append(hour_block)
-    time_blocks = sorted(time_blocks, key=itemgetter('id'))
-    return time_blocks
-
-
-def to_json(api, name, hours, file_path):
-    """
-
-    Args:
-        api:
-        name:
-        hours:
-        file_path: For example, '/Users/me/conversationalist-project/timeline.json'
-
-    Returns:
-
-    """
-    timeline = Timeline(api, name, (hours * -1))
-    with open(file_path, 'w') as outfile:
-        json.dump(timeline, outfile, cls=TimelineEncoder, indent=2)
-
-
 def get_json_file_path(path, tz_name, file_name='conversationalist_data-'):
     timezone = pytz.timezone(tz_name)
-    date_label = datetime.datetime.now(tz=timezone).strftime('%m%d%Y')
+    date_label = datetime.now(tz=timezone).strftime('%m%d%Y')
     return ''.join((path, file_name, date_label,'.json'))
 
 
@@ -128,7 +70,7 @@ def get_output_file_path(path, tz_name, file_name='conversationalist-'):
 
     """
     timezone = pytz.timezone(tz_name)
-    date_label = datetime.datetime.now(tz=timezone).strftime('%m%d%Y-%H%M')
+    date_label = datetime.now(tz=timezone).strftime('%m%d%Y-%H%M')
     output_file_name = ''.join((file_name, date_label,'.txt',))
     return ''.join((path, output_file_name)), output_file_name
 
@@ -144,7 +86,7 @@ def get_email_subject(subject, tz_name):
 
     """
     timezone = pytz.timezone(tz_name)
-    date_label = datetime.datetime.now(tz=timezone).strftime('%m-%d-%Y %H:%M')
+    date_label = datetime.now(tz=timezone).strftime('%m-%d-%Y %H:%M')
     return ''.join((subject, date_label,))
 
 
@@ -166,51 +108,85 @@ def with_encoded(attachment_path, attachment_name):
     return attachment
 
 
-def to_conversation(twitter_username, hours, settings):
+def json_to_conversation(json_file, settings):
+    with open(json_file) as infile:
+        timeline_json = json.load(infile)
+    start = parse(timeline_json['start'])
+    cutoff = parse(timeline_json['cutoff'])
+    set_pre_exchange_content = settings.get('pre_exchange')
+    conversation = Conversation(timeline_json,
+                                start,
+                                cutoff,
+                                style_words=settings['style_words'],
+                                pre_exchange=set_pre_exchange_content)
+    return conversation
+
+
+def timeline_to_json(timeline, data_path, tz_name='UTC'):
+    json_file = get_json_file_path(data_path, tz_name)
+    print('...writing json...')
+    with open(json_file, 'w') as outfile:
+        json.dump(timeline, outfile, cls=TimelineEncoder, indent=1)
+    return json_file
+
+
+def send_conversation_page(email, output_file_path, output_file_name,
+                            settings, tz_name):
+    name = settings.get('name', email)
+    subject = get_email_subject(settings['email_subject'], tz_name)
+    project_name = settings.get('project_name', 'Tweet story')
+    payload = {
+        'subject': subject,
+        'html': '<p>{0} file attached.</p>'.format(project_name),
+        'text': '{0} file attached.'.format(project_name),
+        'to': [{'email': email, 'name': name, 'type': 'to'}],
+        'attachment_path': output_file_path,
+        'attachment_name': output_file_name
+    }
+    print('...sending email to: {0}'.format(email))
+    send_email = settings.get('send_email', None)
+    if isinstance(send_email, collections.Callable):
+        send_email(payload)
+
+
+def go(twitter_username, hours, settings):
+    """
+    Creates web page and data from a twitter account's stream.
+
+    After obtaining twitter api instance, a ``Timeline`` object
+    is instantiated.
+
+    Args:
+        twitter_username (str): The targeted twitter account.
+        hours (int): How far back the stream will be explored.
+        settings (dict): Configuration settings.
+    """
     print('Starting conversationalist. Getting tweets...')
     tz_name = settings.get('tz_name', 'UTC')
     auth = tweepy.OAuthHandler(settings['consumer_key'], settings['consumer_secret'])
-    auth.set_access_token(settings.access_token, settings.access_token_secret)
+    auth.set_access_token(settings['access_token'], settings['access_token_secret'])
     api = tweepy.API(auth)
-    t = Timeline(api, twitter_username, (hours * -1))
-    json_file = get_json_file_path(settings['data_path'], tz_name)
-    print('...writing json...')
-    with open(json_file, 'w') as outfile:
-        json.dump(t, outfile, cls=TimelineEncoder, indent=1)
-    with open(json_file) as infile:
-        timeline = json.load(infile)
-    start = parse(timeline['start'])
-    cutoff = parse(timeline['cutoff'])
-    set_pre_exchange_content = settings.get('pre_exchange')
-    conversation = Conversation(timeline, start, cutoff, style_words=settings['style_words'],
-                                pre_exchange=set_pre_exchange_content)
+    timeline = Timeline(api, twitter_username, (hours * -1))
+    json_file = timeline_to_json(timeline, settings['data_path'], tz_name)
+    conversation = json_to_conversation(json_file, settings)
     output_file_path, output_file_name = get_output_file_path(settings['output_path'], tz_name)
     print('...writing content...')
-    write_story(output_file_path, conversation.data['title'], conversation.data['hourlies'],
-                    conversation.participation.get_ranked_profiles(), conversation.nav)
+    write_story(output_file_path,
+                conversation,
+                settings['template'])
     email = settings.get('email', None)
     if email:
-        name = settings.get('name', email)
-        subject = get_email_subject(settings['email_subject'], tz_name)
-        project_name = settings.get('project_name', 'Tweet story')
-        payload = {
-            'subject': subject,
-            'html': '<p>{0} file attached.</p>'.format(project_name),
-            'text': '{0} file attached.'.format(project_name),
-            'to': [{'email': email, 'name': name, 'type': 'to'}],
-            'attachment_path': output_file_path,
-            'attachment_name': output_file_name
-        }
-        print('...sending email to: {0}'.format(email))
-        send_email = settings.get('send_email', None)
-        if send_email:
-            send_email(payload)
+        send_conversation_page(email,
+                           output_file_path,
+                           output_file_name,
+                           settings,
+                           tz_name)
     print('...conversationalist done.')
 
 
 def print_rate_limit_info(settings):
-    auth = tweepy.OAuthHandler(settings.consumer_key, settings.consumer_secret)
-    auth.set_access_token(settings.access_token, settings.access_token_secret)
+    auth = tweepy.OAuthHandler(settings['consumer_key'], settings['consumer_secret'])
+    auth.set_access_token(settings['access_token'], settings['access_token_secret'])
     api = tweepy.API(auth)
     status = api.rate_limit_status()
     for (k, v) in status['resources'].items():
