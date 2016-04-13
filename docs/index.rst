@@ -21,6 +21,11 @@ Configuration
 Expects ``~/conversationalist/json`` and ``~/conversationalist/content`` directories will be
 available for file-writing.
 
+Testing
+-------
+
+Install ``pytest`` in your python environment.  Clone the ``conversationalits`` repository.
+Then run ``py.test`` from the top-level of the repository clone.
 
 Indices and tables
 ==================

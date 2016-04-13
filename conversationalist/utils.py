@@ -38,7 +38,7 @@ def write_story(path, conversation, template):
 
     Args:
         path:
-        conversation: A ``~.classes.Conversation`` instance.
+        conversation: A :class:`~.classes.Conversation` instance.
         template: For example, 'tick_tock_body.html'
     """
     title = conversation.data['title'],
