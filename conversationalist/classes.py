@@ -144,64 +144,6 @@ class Participation(object):
         return ranked_profiles
 
 
-class Conversation1(object):
-    def __init__(self, timeline, start, cutoff, title='Tick Tock',
-                 style_words=None, pre_exchange=None, post_exchange=None):
-        self.participation = Participation()
-        self.exchanges = []
-        self.title = title
-        self.style_words = style_words
-        self.pre_exchange = pre_exchange
-        self.post_exchange = post_exchange
-        hourly = prepare_hourly_dict(start, cutoff)
-        self.data, self.nav = self._get_conversation(timeline, hourly)
-
-    def _get_pre_content(self, status):
-        if self.pre_exchange:
-            return self.pre_exchange(status)
-        else:
-            return None
-
-    def _get_post_content(self, status):
-        if self.post_exchange:
-            return self.post_exchange(status)
-        else:
-            return None
-
-    def _get_style_classes(self, status):
-        style_classes = ''
-        style_matches = []
-        if self.style_words:
-            for word in self.style_words:
-                pattern = r'\b%s\b' % word
-                regex = re.compile(pattern, re.I)
-                match = regex.search(status.text)
-                if match:
-                    word = word.replace(' ', '-')
-                    style_matches.append(word)
-        for m in set(style_matches):
-            style_classes = ''.join((style_classes, ' ', m, ))
-        return style_classes
-
-    def _get_conversation(self, timeline, hourly):
-        item_headers = []
-        for status in timeline.statuses:
-            self.participation.add_tweet(status.author)
-            if status.origin:
-                self.participation.add_tweet(status.origin.author)
-            status.pre_content = self._get_pre_content(status)
-            if status.pre_content:
-                item_headers.append(status.pre_content)
-            status.post_content = self._get_post_content(status)
-            status.style_classes = self._get_style_classes(status)
-            time_key = status.created_at.strftime(DT_FORMAT)
-            hourly[time_key].insert(0, status)
-        hourlies = {
-            'title': self.title,
-            'hourlies': generate_hourly_summaries(hourly)
-        }
-        return hourlies, set(item_headers)
-
 
 class Conversation(object):
     """
