@@ -14,15 +14,14 @@ VIEW_DT_FORMAT = '%B %d, %Y %I:%M %p'
 BLOCK_DT_FORMAT = '%A, %B %d, %Y  %-I%p'
 
 
-def prepare_hourly_dict(start_dt, cutoff_dt):
+def prepare_hourly_dict(start, cutoff):
     hd = {}
-    start_dt.replace(minute=0)
-    active_dt = cutoff_dt
-    while active_dt < start_dt:
-        hourly_key = active_dt.strftime(DT_FORMAT)
-        #print 'Preparing key ' + hourly_key
+    start.replace(minute=0)
+    active = cutoff
+    while active < start:
+        hourly_key = active.strftime(DT_FORMAT)
         hd[hourly_key] = []
-        active_dt = active_dt + timedelta(hours=1)
+        active = active + timedelta(hours=1)
     return hd
 
 
@@ -34,7 +33,6 @@ def generate_hourly_summaries(hourly_dict):
         time_zone = pytz.timezone('America/Chicago')
         dt = datetime.fromtimestamp(time.mktime(struct_time), time_zone)
         subtitle = dt.strftime(BLOCK_DT_FORMAT)
-        empty = True
         if len(v) > 0:
             empty = False
             message = 'No updates.'
@@ -51,6 +49,12 @@ def generate_hourly_summaries(hourly_dict):
 
 
 class UserEncoder(json.JSONEncoder):
+    """
+    Encodes ``tweepy`` ``User`` objects into an abbreviated JSON format object.
+
+    Encodes the fields ``id``, ``screen_name``, and ``profile_image_url``. And that's
+    it.
+    """
     def default(self, o):
         user = {
             'id': o.id,
@@ -61,43 +65,51 @@ class UserEncoder(json.JSONEncoder):
 
 
 class StatusEncoder(json.JSONEncoder):
-    def default(self, o):
+    """
+    Encodes `~.classes.Status` objects into JSON.
+
+    The ``created_at`` property is encoded as a string in ISO8601 format.
+    """
+    def default(self, obj):
         origin = None
-        if o.origin:
+        if obj.origin:
             origin = {
-                'author': UserEncoder().default(o.origin.author),
-                'text': o.origin.text
+                'author': UserEncoder().default(obj.origin.author),
+                'text': obj.origin.text
             }
-            #print 'Added origin author'
-            #print origin['author']['screen_name']
         status = {
-            'author': o.author,
+            'author': obj.author,
             'origin': origin,
-            'text': o.text,
-            'created_at': str(o.created_at)
+            'text': obj.text,
+            'created_at': obj.created_at.isoformat()
         }
         return status
 
 
 class TimelineEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, User):
-            return UserEncoder().default(o)
-        else:
-            statuses = []
-            for s in o.statuses:
-                statuses.append(StatusEncoder().default(s))
+    """
+    Encodes `~.classes.Timeline` objects into JSON.
+
+    The ``start`` and ``cutoff`` properties are encoded as strings in ISO8601 format.
+    """
+    def default(self, obj):
+        if isinstance(obj, User):
+            return UserEncoder().default(obj)
+        if isinstance(obj, Timeline):
+            statuses = {}
+            for status_key, status in obj.statuses.items():
+                statuses[status_key] = StatusEncoder().default(status)
             timeline = {
-                # 'cutoff': o.cutoff.strftime("%Y-%m-%d %H:%M:%S.%f"),
-                # 'start': o.start.strftime("%Y-%m-%d %H:%M:%S.%f"),
-                'cutoff': str(o.cutoff),
-                'start': str(o.start),
+                'start': obj.start.isoformat(),
+                'cutoff': obj.cutoff.isoformat(),
                 'statuses': statuses,
-                'total': o.total,
-                'tz': o.tz.zone,
-                'user': o.user
+                'total': obj.total,
+                'tz': obj.tz.zone,
+                'user': obj.user
             }
             return timeline
+        else:
+            pass
 
 
 class Participant(object):
@@ -183,7 +195,6 @@ class Conversation1(object):
             status.post_content = self._get_post_content(status)
             status.style_classes = self._get_style_classes(status)
             time_key = status.created_at.strftime(DT_FORMAT)
-            #print 'Created key ' + time_key
             hourly[time_key].insert(0, status)
         hourlies = {
             'title': self.title,
@@ -196,16 +207,35 @@ class Conversation(object):
     """
     Manages the state of user's tweet stream during application processing.
     """
-    def __init__(self, timeline, start, cutoff, title='Tick Tock',
+    def __init__(self, timeline=None, start=None, cutoff=None, title='Tick Tock',
                  style_words=None, pre_exchange=None, post_exchange=None):
+        """
+        Initializes a ``Conversation`` object.
+
+        When ``timeline``, ``start``, and ``cutoff`` data is passed, the
+        class internally undertakes the exchange of status data into
+        the conversation's format.  Otherwise, it just holds the
+        state of whatever property data is passed.
+
+        Args:
+            timeline (dict): A JSON object representing a timeline.
+            start (datetime): When the timeline begins.
+            cutoff (datetime): When in the past the timeline search ends.
+            title (str): The name for the conversation object's data.
+            style_words (list): The strings are added as CSS selector classes in
+                conversation template.
+            pre_exchange (function): Handles status transformations before templating.
+            post_exchange (function): Handles status transformations after exchange.
+        """
         self.participation = Participation()
         self.exchanges = []
         self.title = title
         self.style_words = style_words
         self.pre_exchange = pre_exchange
         self.post_exchange = post_exchange
-        hourly = prepare_hourly_dict(start, cutoff)
-        self.data, self.nav = self._get_conversation(timeline, hourly)
+        if timeline and start and cutoff:
+            hourly = prepare_hourly_dict(start, cutoff)
+            self.data, self.nav = self._get_conversation(timeline, hourly)
 
     def _get_pre_content(self, status):
         if self.pre_exchange:
@@ -259,18 +289,19 @@ class Conversation(object):
 class Timeline(object):
     """
     Manages state of a a twitter user's timeline data.
+
     Attributes:
         earliest_id (int): The identifier for the 'earliest' tweet status.
     """
-    def __init__(self, api=None, user=None, timeframe=-24, tz_name='America/Chicago'):
+    def __init__(self, api=None, user=None, timeframe=-24, tz_name='UTC'):
         self.tz = pytz.timezone(tz_name)
         self.api = api
-        self.current_earliest_status = None
+        self.earliest_status = None
         self.earliest_id = None
-        self.encoder = TimelineEncoder
-        self.cutoff = datetime.now(tz=self.tz) + timedelta(hours=timeframe)
+        safe_timeframe = abs(timeframe) * -1
+        self.cutoff = datetime.now(tz=self.tz) + timedelta(hours=safe_timeframe)
         self.start = datetime.now(tz=self.tz)
-        self.statuses = []
+        self.statuses = {}
         self.user = user
         if api and user:
             self._generate_timeline()
@@ -291,23 +322,31 @@ class Timeline(object):
             TweepError: If tweepy error occurs while seeking an origin for a
                 status, which is typically a tweet that was responded too.
         Args:
-            statuses (list): A list of tweepy ``Status`` objects.
+            statuses (list): A a list of tweepy ``Status`` objects.
         """
         for status in statuses:
-            utc = pytz.utc
-            status.created_at = utc.localize(status.created_at).astimezone(self.tz)
-            if status.created_at > self.cutoff:
-                status.text = status.text.encode('ascii', 'ignore')
-                status.origin = None
-                if status.in_reply_to_status_id:
-                    try:
-                        status.origin = self.api.get_status(status.in_reply_to_status_id)
-                        status.origin.text = status.origin.text.encode('ascii', 'ignore')
-                        user = status.origin.user
-                        status.origin.author_name = user.screen_name
-                    except TweepError as e:
-                        print('Error while fetching origin for tweet {0}'.format(status.id))
-                self.statuses.append(status)
+            if str(status.id) not in self.statuses:
+                # check if 'created_at' is naive. Tweepy creates naive created_at fields
+                # from utc time units
+                if status.created_at.tzinfo is None or \
+                        status.created_at.tzinfo.utcoffset(status.created_at) is None:
+                    utc = pytz.utc
+                    # naive to utc
+                    utc_created_at = utc.localize(status.created_at)
+                    # utc to user-selected timezone
+                    status.created_at = utc_created_at.astimezone(self.tz)
+                if status.created_at > self.cutoff:
+                    status.text = status.text.encode('ascii', 'ignore')
+                    status.origin = None
+                    if status.in_reply_to_status_id:
+                        try:
+                            status.origin = self.api.get_status(status.in_reply_to_status_id)
+                            status.origin.text = status.origin.text.encode('ascii', 'ignore')
+                            user = status.origin.user
+                            status.origin.author_name = user.screen_name
+                        except TweepError as e:
+                            print('Error while fetching origin for tweet {0}'.format(status.id))
+                    self.statuses[str(status.id)] = status
 
     def get_earliest_status(self):
         """
@@ -315,26 +354,31 @@ class Timeline(object):
         property from oldest at the start of the list to newest
         at the end of the list.
 
-        Additionally, sets the 'earliest_id' to that of the earliest
-        status.
-
         Returns:
-            The earliest (oldest) status or ``None`` if empty.
+            ``Status``: The earliest (oldest) status or ``None`` if empty.
         """
         earliest = None
         if self.statuses:
-            self.statuses.sort(key=lambda s: s.created_at)
-            earliest = self.statuses[0]
+            sorted_statuses = sorted(self.statuses.values(), key=lambda status: status.created_at)
+            earliest = sorted_statuses[0]
         return earliest
-
 
     @property
     def total(self):
-        return len(self.statuses)
+        """
+        Computed property representing the total count of statuses for the instance.
+
+        Returns:
+            int: The total count of statuses.
+        """
+        return len(list(self.statuses.values()))
 
     def get_timeline_batch(self, max_id=None):
         """
         Gets a batch of statuses for a user.
+
+        If a ``max_id`` is passed, that is supplied to the API
+        is a starting point for fetching the previous 20 tweets.
 
         Args:
             max_id: The last identifier that included in this batch
@@ -349,33 +393,51 @@ class Timeline(object):
         else:
             return self.api.user_timeline(self.user, max_id=max_id)
 
-    def _has_tweets_available(self):
+    def _has_next_tweets(self):
+        """
+        Checks current statuses to see if the timeframe cutoff for a user's timeline
+        has been reached or available statuses have been exhausted.
+
+        Returns:
+            bool: ``True`` if additional twitter statuses that fit into the timeframe cutoff
+                may exist. ``False`` otherwise.
+        """
         new_earliest_status = self.get_earliest_status()
         if new_earliest_status:
             # Exceeded cutoff because the earliest status is older (lesser) than the cutoff
             if new_earliest_status.created_at < self.cutoff:
-                self.current_earliest_status = new_earliest_status
+                self.earliest_status = new_earliest_status
                 return False
             # In case all available tweets are exhausted
-            if self.current_earliest_status and \
-                    self.current_earliest_status.id == new_earliest_status.id:
+            if self.earliest_status and \
+                    self.earliest_status.id == new_earliest_status.id:
                 return False
             # keep going - cutoff not exceeded and new earliest id not the current earliest id
-            self.current_earliest_status = new_earliest_status
+            self.earliest_status = new_earliest_status
             return True
         return False
 
     def _generate_timeline(self):
+        """
+        Called during instance intialization. It fetches tweet statuses allowed
+        by the cutoff timeframe until available statuses are exhausted.
+        """
         tweets_available = True
         while tweets_available:
-            next_tweets = self.get_timeline_batch(self.earliest_id)
-            if next_tweets:
-                self.load(next_tweets)
-                tweets_available = self._has_tweets_available()
+            new_tweets = self.get_timeline_batch(self.earliest_id)
+            if new_tweets:
+                self.load(new_tweets)
+                tweets_available = self._has_next_tweets()
             else:
                 tweets_available = False
 
     def to_json(self, file_path):
-        with open(file_path, 'w') as outfile:
-            json.dump(self, outfile, cls=self.encoder, indent=2)
+        """
+        Writes a JSON file base on instance data.
 
+        Args:
+            file_path (str): Where the JSON file will be written.
+        """
+        with open(file_path, 'w') as outfile:
+            json.dump(self, outfile, cls=TimelineEncoder, indent=2)
+        return file_path
