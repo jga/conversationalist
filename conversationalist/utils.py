@@ -9,7 +9,6 @@ import pytz
 from dateutil.parser import parse
 from .classes import Conversation, Timeline, TimelineEncoder
 
-
 template_path = ''.join((os.path.dirname(os.path.abspath(__file__)), '/templates',))
 template_env = Environment(loader=FileSystemLoader(template_path))
 
@@ -109,6 +108,18 @@ def with_encoded(attachment_path, attachment_name):
 
 
 def json_to_conversation(json_file, settings):
+    """
+    Transforms the JSON data for a user timeline into
+    a ``Conversation`` object.
+
+    Args:
+        json_file (str): The file location of the timeline JSON.
+        settings (dict): Configuration choices utilized in the creation of
+            the ``Conversation`` object.
+
+    Returns:
+        ``Conversation``: The generated ``Conversation`` object.
+    """
     with open(json_file) as infile:
         timeline_json = json.load(infile)
     start = parse(timeline_json['start'])
@@ -120,14 +131,6 @@ def json_to_conversation(json_file, settings):
                                 style_words=settings['style_words'],
                                 pre_exchange=set_pre_exchange_content)
     return conversation
-
-
-def timeline_to_json(timeline, data_path, tz_name='UTC'):
-    json_file = get_json_file_path(data_path, tz_name)
-    print('...writing json...')
-    with open(json_file, 'w') as outfile:
-        json.dump(timeline, outfile, cls=TimelineEncoder, indent=1)
-    return json_file
 
 
 def send_conversation_page(email, output_file_path, output_file_name,
@@ -154,7 +157,11 @@ def go(twitter_username, hours, settings):
     Creates web page and data from a twitter account's stream.
 
     After obtaining twitter api instance, a ``Timeline`` object
-    is instantiated.
+    is instantiated. It's data is encoded into a JSON file. This
+    allows portability for the timeline instance.
+
+    The timeline's JSON is then consumed for the creation of a ``Conversation``
+    instance.
 
     Args:
         twitter_username (str): The targeted twitter account.
@@ -167,8 +174,9 @@ def go(twitter_username, hours, settings):
     auth.set_access_token(settings['access_token'], settings['access_token_secret'])
     api = tweepy.API(auth)
     timeline = Timeline(api, twitter_username, (hours * -1))
-    json_file = timeline_to_json(timeline, settings['data_path'], tz_name)
-    conversation = json_to_conversation(json_file, settings)
+    json_file_path = settings['data_path']
+    timeline.to_json(json_file_path)
+    conversation = json_to_conversation(json_file_path, settings)
     output_file_path, output_file_name = get_output_file_path(settings['output_path'], tz_name)
     print('...writing content...')
     write_story(output_file_path,
