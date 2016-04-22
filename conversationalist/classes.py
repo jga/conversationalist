@@ -7,33 +7,47 @@ from operator import attrgetter
 from operator import itemgetter
 from dateutil.parser import parse
 from tweepy.error import TweepError
-from tweepy.models import User
+from tweepy.models import User, Status
 
 DT_FORMAT = '%B-%d-%Y-%I-%p'
 VIEW_DT_FORMAT = '%B %d, %Y %I:%M %p'
 BLOCK_DT_FORMAT = '%A, %B %d, %Y  %-I%p'
 
 
-def prepare_hourly_dict(start, cutoff):
-    hd = {}
+def initialize_hourly_summary(start, cutoff, datetime_format=DT_FORMAT):
+    """
+    Generates a dict that contains statuses for each hour during
+    a timeframe. The statuses are keyed to a timestamp string.
+
+    At initialization, the list for each timestamp is empty.
+
+    Args:
+        start (datetime): The timeline's start.
+        cutoff (datetime): When the timeline's status search ends.
+        datetime_format: The format for the timestamp key.
+
+    Returns:
+        dict: Statuses keyed to timestamps arranged in hourly increments.
+    """
+    hourly_summary = {}
     start.replace(minute=0)
     active = cutoff
     while active < start:
-        hourly_key = active.strftime(DT_FORMAT)
-        hd[hourly_key] = []
+        hourly_key = active.strftime(datetime_format)
+        hourly_summary[hourly_key] = []
         active = active + timedelta(hours=1)
-    return hd
+    return hourly_summary
 
 
-def generate_hourly_summaries(hourly_dict):
-    time_blocks = []
-    for k, v in hourly_dict.items():
-        struct_time = time.strptime(k, DT_FORMAT)
+def to_periods(hourly_summary, tz_name='UTC'):
+    periods = []
+    for timestamp, statuses in hourly_summary.items():
+        struct_time = time.strptime(timestamp, DT_FORMAT)
         seconds = time.mktime(struct_time)
-        time_zone = pytz.timezone('America/Chicago')
+        time_zone = pytz.timezone(tz_name)
         dt = datetime.fromtimestamp(time.mktime(struct_time), time_zone)
         subtitle = dt.strftime(BLOCK_DT_FORMAT)
-        if len(v) > 0:
+        if len(statuses) > 0:
             empty = False
             message = 'No updates.'
             hour_block = {
@@ -41,11 +55,11 @@ def generate_hourly_summaries(hourly_dict):
                 'empty': empty,
                 'empty_message': message,
                 'subtitle': subtitle,
-                'statuses': v
+                'statuses': statuses
             }
-            time_blocks.append(hour_block)
-    time_blocks = sorted(time_blocks, key=itemgetter('id'))
-    return time_blocks
+            periods.append(hour_block)
+    periods = sorted(periods, key=itemgetter('id'))
+    return periods
 
 
 class UserEncoder(json.JSONEncoder):
@@ -81,7 +95,8 @@ class StatusEncoder(json.JSONEncoder):
             'author': obj.author,
             'origin': origin,
             'text': obj.text,
-            'created_at': obj.created_at.isoformat()
+            'created_at': obj.created_at.isoformat(),
+            'in_reply_to_status_id': getattr(obj, 'in_reply_to_status_id', '')
         }
         return status
 
@@ -95,14 +110,13 @@ class TimelineEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, User):
             return UserEncoder().default(obj)
+        if isinstance(obj, Status):
+            return StatusEncoder().default(obj)
         if isinstance(obj, Timeline):
-            statuses = {}
-            for status_key, status in obj.statuses.items():
-                statuses[status_key] = StatusEncoder().default(status)
             timeline = {
                 'start': obj.start.isoformat(),
                 'cutoff': obj.cutoff.isoformat(),
-                'statuses': statuses,
+                'statuses': obj.statuses,
                 'total': obj.total,
                 'tz': obj.tz.zone,
                 'user': obj.user
@@ -144,13 +158,12 @@ class Participation(object):
         return ranked_profiles
 
 
-
 class Conversation(object):
     """
     Manages the state of user's tweet stream during application processing.
     """
-    def __init__(self, timeline=None, start=None, cutoff=None, title='Tick Tock',
-                 style_words=None, pre_exchange=None, post_exchange=None):
+    def __init__(self, timeline=None, title='Tick Tock',
+                 style_words=None, adapter=None):
         """
         Initializes a ``Conversation`` object.
 
@@ -161,37 +174,46 @@ class Conversation(object):
 
         Args:
             timeline (dict): A JSON object representing a timeline.
-            start (datetime): When the timeline begins.
-            cutoff (datetime): When in the past the timeline search ends.
             title (str): The name for the conversation object's data.
             style_words (list): The strings are added as CSS selector classes in
                 conversation template.
-            pre_exchange (function): Handles status transformations before templating.
-            post_exchange (function): Handles status transformations after exchange.
+            adapter: Handles transformation logic for status data.
+
+        Attributes:
+            participation (:class:``~.classes.Participation``): Tallies engagement.
+            title (str): Main name for conversation.
+            style_words (list): Words that will trigger addition of a CSS style class in template.
+            adapter: Handles transformation logic for status data.
+            data (dict): Contains pairing of timestamps and statuses keyed to 'hourlies', as
+                well as a title name keyed to 'title'.
+            nav: Helpful navigation data for topics identified by content handlers.
         """
         self.participation = Participation()
-        self.exchanges = []
+        self.data = None
+        self.nav = None
+        self.timeline = timeline
         self.title = title
         self.style_words = style_words
-        self.pre_exchange = pre_exchange
-        self.post_exchange = post_exchange
-        if timeline and start and cutoff:
-            hourly = prepare_hourly_dict(start, cutoff)
-            self.data, self.nav = self._get_conversation(timeline, hourly)
+        self.adapter = adapter
+        self.update_conversation()
 
-    def _get_pre_content(self, status):
-        if self.pre_exchange:
-            return self.pre_exchange(status)
+    def transform_content(self, status):
+        """
+        Applies the class instances adapter to the current status.
+
+        Args:
+            status(dict): Tweet status data
+
+        Returns:
+            The result from passing the status to the adapter function or ``None`` if
+            an adapter is not set for the class instance.
+        """
+        if self.adapter:
+            return self.adapter(status)
         else:
             return None
 
-    def _get_post_content(self, status):
-        if self.post_exchange:
-            return self.post_exchange(status)
-        else:
-            return None
-
-    def _get_style_classes(self, status):
+    def get_style_classes(self, status):
         style_classes = ''
         style_matches = []
         if self.style_words:
@@ -206,26 +228,55 @@ class Conversation(object):
             style_classes = ''.join((style_classes, ' ', m, ))
         return style_classes
 
-    def _get_conversation(self, timeline, hourly):
-        item_headers = []
-        for status in timeline['statuses']:
-            self.participation.add_tweet(status['author'])
-            if status['origin']:
-                self.participation.add_tweet(status['origin']['author'])
-            status['pre_content'] = self._get_pre_content(status)
-            if status['pre_content']:
-                item_headers.append(status['pre_content'])
-            status['post_content'] = self._get_post_content(status)
-            status['style_classes'] = self._get_style_classes(status)
-            time_key = parse(status['created_at']).strftime(DT_FORMAT)
-            #print 'Created key ' + time_key
-            hourly[time_key].insert(0, status)
-        hourlies = {
-            'title': self.title,
-            'hourlies': generate_hourly_summaries(hourly)
-        }
-        nav = sorted(set(item_headers))
-        return hourlies, nav
+    def _get_timeline_interval(self):
+        if self.timeline:
+            start = parse(self.timeline['start'])
+            cutoff = parse(self.timeline['cutoff'])
+            return start, cutoff
+        return None, None
+
+    def update_conversation(self):
+        """
+        Iterates through conversation status dictionaries adding their data to
+        the instances ``Participation`` property, handling content transformations,
+        and inserting style classes.  This logic helps create more informative
+        pages once the data is rendered.
+        """
+        if self.timeline:
+            start, cutoff = self._get_timeline_interval()
+            hourly_summary = initialize_hourly_summary(start, cutoff)
+            statuses = self.timeline.get('statuses', {})
+            topic_headers = []
+            for identifier, status in statuses.items():
+                self.participation.add_tweet(status['author'])
+                if status['origin']:
+                    self.participation.add_tweet(status['origin']['author'])
+                status['adaptation'] = self.transform_content(status)
+                if status['adaptation'] and 'topic_header' in status['adaptation']:
+                    topic_headers.append(status['adaptation']['topic_header'])
+                status['style_classes'] = self.get_style_classes(status)
+                time_key = parse(status['created_at']).strftime(DT_FORMAT)
+                hourly_summary[time_key].insert(0, status)
+            self.data = {
+                'title': self.title,
+                'periods': to_periods(hourly_summary)
+            }
+            self.nav = sorted(set(topic_headers))
+
+    def load(self, json_file, settings=None):
+        """
+        Transforms the JSON data for a user timeline into
+        relevant properties for this class.
+
+        Args:
+            json_file (str): The file location of the timeline JSON.
+            pre_exchange (dict): Configuration information to be set into
+                conversation instance.
+        """
+        with open(json_file) as infile:
+            timeline_json = json.load(infile)
+        self.timeline = timeline_json
+        self.update_conversation()
 
 
 class Timeline(object):
@@ -269,7 +320,7 @@ class Timeline(object):
         for status in statuses:
             if str(status.id) not in self.statuses:
                 # check if 'created_at' is naive. Tweepy creates naive created_at fields
-                # from utc time units
+                # from utc timestamps parsed from Twitter API's RFC 2822 format
                 if status.created_at.tzinfo is None or \
                         status.created_at.tzinfo.utcoffset(status.created_at) is None:
                     utc = pytz.utc
@@ -278,12 +329,12 @@ class Timeline(object):
                     # utc to user-selected timezone
                     status.created_at = utc_created_at.astimezone(self.tz)
                 if status.created_at > self.cutoff:
-                    status.text = status.text.encode('ascii', 'ignore')
+                    #status.text = status.text.encode('ascii', 'ignore')
                     status.origin = None
                     if status.in_reply_to_status_id:
                         try:
                             status.origin = self.api.get_status(status.in_reply_to_status_id)
-                            status.origin.text = status.origin.text.encode('ascii', 'ignore')
+                            #status.origin.text = status.origin.text.encode('ascii', 'ignore')
                             user = status.origin.user
                             status.origin.author_name = user.screen_name
                         except TweepError as e:
