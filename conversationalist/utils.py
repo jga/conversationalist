@@ -106,33 +106,6 @@ def with_encoded(attachment_path, attachment_name):
     }
     return attachment
 
-
-def json_to_conversation(json_file, settings):
-    """
-    Transforms the JSON data for a user timeline into
-    a ``Conversation`` object.
-
-    Args:
-        json_file (str): The file location of the timeline JSON.
-        settings (dict): Configuration choices utilized in the creation of
-            the ``Conversation`` object.
-
-    Returns:
-        ``Conversation``: The generated ``Conversation`` object.
-    """
-    with open(json_file) as infile:
-        timeline_json = json.load(infile)
-    start = parse(timeline_json['start'])
-    cutoff = parse(timeline_json['cutoff'])
-    set_pre_exchange_content = settings.get('pre_exchange')
-    conversation = Conversation(timeline_json,
-                                start,
-                                cutoff,
-                                style_words=settings['style_words'],
-                                pre_exchange=set_pre_exchange_content)
-    return conversation
-
-
 def send_conversation_page(email, output_file_path, output_file_name,
                             settings, tz_name):
     name = settings.get('name', email)
@@ -176,7 +149,8 @@ def go(twitter_username, hours, settings):
     timeline = Timeline(api, twitter_username, (hours * -1))
     json_file_path = settings['data_path']
     timeline.to_json(json_file_path)
-    conversation = json_to_conversation(json_file_path, settings)
+    conversation = Conversation()
+    conversation.load(json_file_path, settings)
     output_file_path, output_file_name = get_output_file_path(settings['output_path'], tz_name)
     print('...writing content...')
     write_story(output_file_path,
