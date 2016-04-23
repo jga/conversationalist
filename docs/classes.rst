@@ -3,4 +3,6 @@ Classes
 =======
 
 .. automodule:: conversationalist.classes
-    :members:
+   :members:
+   :private-members:
+   :special-members: __init__
