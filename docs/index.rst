@@ -84,9 +84,8 @@ Parsing dates from timeline JSON
 The :func:`~.utils.json_to_conversation` function parses ``Timeline`` objects encoded in JSON. The
 function relies on the `date-util` project's ``parse`` utility function to transform the ``start`` and
 ``cutoff`` properties of JSON objects into Python datetime objects.  Timeline datetimes are encoded
-into ISO8601, which the ``parse`` utility function reads.
-
-
+into ISO8601, which the ``parse`` utility function reads; the ``parse`` function transfers te ISO8601
+UTC offset into the Python datetime object's ``tzinfo`` with a ``tzoffset``.
 
 
 Indices and tables
