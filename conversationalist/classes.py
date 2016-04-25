@@ -167,7 +167,6 @@ class Timeline(object):
     Attributes:
         api: Tweepy API instance.
         earliest_status: Holds the earliest status handled during timeline generation.
-        earliest_id (int): The identifier for the 'earliest' tweet status.
         start (datetime): When the timeline starts. Set to ``now`` at initialization.
         cutoff (datetime): When in the past the timeline's search for statuses ends.
         data (dict): Maps an identifier to status information.
@@ -176,7 +175,6 @@ class Timeline(object):
     def __init__(self, api=None, username=None, timeframe=-24):
         self.api = api
         self.earliest_status = None
-        self.earliest_id = None
         self.start = datetime.now(tz=timezone.utc)
         safe_timeframe = abs(timeframe) * -1
         self.cutoff = self.start + timedelta(hours=safe_timeframe)
@@ -298,7 +296,8 @@ class Timeline(object):
         """
         tweets_available = True
         while tweets_available:
-            new_tweets = self.get_timeline_batch(self.earliest_id)
+            earliest_id = getattr(self.earliest_status, 'id', None)
+            new_tweets = self.get_timeline_batch(earliest_id)
             if new_tweets:
                 self.load(new_tweets)
                 tweets_available = self._has_next_tweets()
