@@ -1,11 +1,11 @@
 {
-  "start": "2010-02-24T16:00:08.017301-06:00",
-  "cutoff": "2010-02-23T16:00:08.017301-06:00",
+  "start": "2010-02-24T16:00:08.017301+00:00",
+  "cutoff": "2010-02-23T16:00:08.017301+00:00",
   "data": {
     "5": {
       "origin": null,
       "in_reply_to_status_id": null,
-      "created_at": "2010-02-24T08:00:08.010010-06:00",
+      "created_at": "2010-02-24T08:00:08.010010+00:00",
       "text": "The text for mock status 5",
       "author": {
         "profile_image_url": "http:\\/\\/a1.twimg.com\\/profile_images\\/101\\/avatar_normal.png",
@@ -16,7 +16,7 @@
     "1": {
       "origin": null,
       "in_reply_to_status_id": null,
-      "created_at": "2010-02-23T20:00:08.014643-06:00",
+      "created_at": "2010-02-23T20:00:08.014643+00:00",
       "text": "The text for mock status 1",
       "author": {
         "profile_image_url": "http:\\/\\/a1.twimg.com\\/profile_images\\/101\\/avatar_normal.png",
@@ -27,7 +27,7 @@
     "2": {
       "origin": null,
       "in_reply_to_status_id": null,
-      "created_at": "2010-02-24T05:00:08.015116-06:00",
+      "created_at": "2010-02-24T05:00:08.015116+00:00",
       "text": "The text for mock status 2",
       "author": {
         "profile_image_url": "http:\\/\\/a1.twimg.com\\/profile_images\\/101\\/avatar_normal.png",
@@ -38,7 +38,7 @@
     "4": {
       "origin": null,
       "in_reply_to_status_id": null,
-      "created_at": "2010-02-24T07:00:08.016366-06:00",
+      "created_at": "2010-02-24T07:00:08.016366+00:00",
       "text": "The text for mock status 4",
       "author": {
         "profile_image_url": "http:\\/\\/a1.twimg.com\\/profile_images\\/101\\/avatar_normal.png",
@@ -49,7 +49,7 @@
     "3": {
       "origin": null,
       "in_reply_to_status_id": null,
-      "created_at": "2010-02-24T06:00:08.015906-06:00",
+      "created_at": "2010-02-24T06:00:08.015906+00:00",
       "text": "The text for mock status 3",
       "author": {
         "profile_image_url": "http:\\/\\/a1.twimg.com\\/profile_images\\/101\\/avatar_normal.png",
