@@ -30,15 +30,18 @@ class StatusEncoder(json.JSONEncoder):
     The ``created_at`` property is encoded as a string in ISO8601 format.
     """
     def default(self, obj):
-        origin = None
-        if obj.origin:
-            origin = {
+        if isinstance(obj, User):
+            return UserEncoder().default(obj)
+        simple_origin = None
+        origin = getattr(obj, 'origin', None)
+        if origin:
+            simple_origin = {
                 'author': UserEncoder().default(obj.origin.author),
                 'text': obj.origin.text
             }
         status = {
             'author': obj.author,
-            'origin': origin,
+            'origin': simple_origin,
             'text': obj.text,
             'created_at': obj.created_at.isoformat(),
             'in_reply_to_status_id': getattr(obj, 'in_reply_to_status_id', '')
@@ -57,17 +60,14 @@ class TimelineEncoder(json.JSONEncoder):
             return UserEncoder().default(obj)
         if isinstance(obj, Status):
             return StatusEncoder().default(obj)
-        if isinstance(obj, Timeline):
-            timeline = {
-                'start': obj.start.isoformat(),
-                'cutoff': obj.cutoff.isoformat(),
-                'data': obj.data,
-                'total': obj.total,
-                'username': obj.username
-            }
-            return timeline
-        else:
-            pass
+        timeline = {
+            'start': obj.start.isoformat(),
+            'cutoff': obj.cutoff.isoformat(),
+            'data': obj.data,
+            'total': obj.total,
+            'username': obj.username
+        }
+        return timeline
 
 
 class Participant(object):
@@ -90,7 +90,6 @@ class Participation(object):
             participant.increment_participation()
         else:
             participant = Participant(author['screen_name'], author['profile_image_url'])
-            #print 'Added participant ', author.screen_name, ' ', author.profile_image_url
             participant.increment_participation()
             self.participants[author['screen_name']] = participant
 
@@ -106,8 +105,7 @@ class Conversation(object):
     """
     Manages the state of user's tweet stream during application processing.
     """
-    def __init__(self, timeline=None, title='Tick Tock',
-                 style_words=None, adapter=None):
+    def __init__(self, timeline=None, title='Tick Tock', adapter=None):
         """
         Initializes a ``Conversation`` object.
 
@@ -119,8 +117,6 @@ class Conversation(object):
         Args:
             timeline (dict): A JSON object representing a timeline.
             title (str): The name for the conversation object's data.
-            style_words (list): The strings are added as CSS selector classes in
-                conversation template.
             adapter: Handles transformation logic for status data.
 
         Attributes:
@@ -150,15 +146,13 @@ class Conversation(object):
             adapter = self.adapter(self)
             self.data = adapter.convert()
 
-    def load(self, json_file, settings=None):
+    def load(self, json_file):
         """
         Transforms the JSON data for a user timeline into
         relevant properties for this class.
 
         Args:
             json_file (str): The file location of the timeline JSON.
-            pre_exchange (dict): Configuration information to be set into
-                conversation instance.
         """
         with open(json_file) as infile:
             timeline_json = json.load(infile)
@@ -195,10 +189,6 @@ class Timeline(object):
         """
         The method transforms and appends the passed statuses to the class instances
         `statuses` property.
-
-        As part of the transformation of status data, the method converts
-        the status `created_at` timestamp into the class instances
-        timezone. Additionally, the method encodes the text to 'ascii'.
 
         If a status is a response, the method searches for the original
         tweet an adds the text and author name to the status data.
