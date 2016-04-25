@@ -216,9 +216,9 @@ class Timeline(object):
                         try:
                             status.origin = self.api.get_status(status.in_reply_to_status_id)
                             #status.origin.text = status.origin.text.encode('ascii', 'ignore')
-                            user = status.origin.user
+                            user = status.origin.author
                             status.origin.author_name = user.screen_name
-                        except TweepError as e:
+                        except TweepError:
                             print('Error while fetching origin for tweet {0}'.format(status.id))
                     self.data[str(status.id)] = status
 
