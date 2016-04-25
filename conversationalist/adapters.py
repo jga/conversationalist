@@ -111,7 +111,7 @@ def transform_with_topic_headers(conversation, pattern, return_goup):
             topic_header = find_topic_header(status, pattern, return_goup)
             if topic_header:
                 topic_headers.append(topic_header)
-        created_with_no_minutes = parse(status['created_at']).replace(minute=0, second=0)
+        created_with_no_minutes = parse(status['created_at']).replace(minute=0, second=0, microsecond=0)
         time_key = created_with_no_minutes.isoformat()
         hourly_summary[time_key].insert(0, status)
     nav = sorted(set(topic_headers))
@@ -146,7 +146,7 @@ def transform_with_participation_and_styles(conversation, style_words,
                 topic_headers.append(topic_header)
         if style_words:
             status['style_classes'] = get_style_classes(style_words, status)
-        created_with_no_minutes = parse(status['created_at']).replace(minute=0, second=0)
+        created_with_no_minutes = parse(status['created_at']).replace(minute=0, second=0, microsecond=0)
         time_key = created_with_no_minutes.isoformat()
         hourly_summary[time_key].insert(0, status)
     nav = sorted(set(topic_headers))
@@ -198,7 +198,7 @@ class TextReplaceAdapter:
             if self.conversions:
                 for original, replacement in self.conversions.items():
                     status['text'].replace(original, replacement)
-            created_with_no_minutes = parse(status['created_at']).replace(minute=0, second=0)
+            created_with_no_minutes = parse(status['created_at']).replace(minute=0, second=0, microsecond=0)
             time_key = created_with_no_minutes.isoformat()
             hourly_summary[time_key].insert(0, status)
         data = {
