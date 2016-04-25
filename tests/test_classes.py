@@ -1,11 +1,13 @@
 from datetime import datetime, timezone, timedelta
 from dateutil.parser import parse
+from io import StringIO
 import json
 import os
-import pytz
 import re
+import sys
 import unittest
 from unittest.mock import Mock
+from tweepy.error import TweepError
 from conversationalist import classes,adapters
 from .adapters import ConvoParticipationAdapter as ParticipationAdapter
 from .adapters import ConvoTextAdapter as TextAdapter
@@ -84,14 +86,30 @@ def generate_mock_statuses(naive_dt=True, datetime_fixtures=None):
 
 
 class MockAPI:
-    def __init__(self, statuses=None):
+    def __init__(self, statuses=None, multi_response=False):
+        self.multi_response = multi_response
         if statuses is not None:
             self.statuses = statuses
         else:
             self.statuses = generate_mock_statuses()
 
+    def get_status(self, status_id):
+        status = next((s for s in self.statuses if s.id == status_id), None)
+        if status:
+            return status
+        else:
+            raise TweepError('No status with requested id')
+
     def user_timeline(self, user, max_id=None):
-        return self.statuses
+        if self.multi_response:
+            if len(self.statuses) == 1:
+                return self.statuses
+            else:
+                status = self.statuses.pop(0)
+                return [status]
+        else:
+            return self.statuses
+
 
 class StatusEncoderTests(unittest.TestCase):
 
@@ -140,6 +158,11 @@ class TimelineTests(unittest.TestCase):
         timeline = classes.Timeline(api=api, username='testuser')
         self.assertEqual(len(list(timeline.data.values())), 7)
 
+    def test_generate_timeline_multiple_requests(self):
+        api = MockAPI(multi_response=True)
+        timeline = classes.Timeline(api=api, username='testuser')
+        self.assertEqual(len(list(timeline.data.values())), 7)
+
     def test_generate_timeline_with_tight_central_cutoff(self):
         api = MockAPI()
         timeline = classes.Timeline(api=api, username='testuser', timeframe=-12)
@@ -149,6 +172,29 @@ class TimelineTests(unittest.TestCase):
         api = MockAPI()
         timeline = classes.Timeline(api=api, username='testuser', timeframe=1)
         self.assertTrue(len(list(timeline.data.values())), 1)
+
+    def test_batch_with_maximum_id(self):
+        timeline = classes.Timeline(username='testuser')
+        api = MockAPI(multi_response=True)
+        timeline.api = api
+        statuses = timeline.get_timeline_batch(max_id=2)
+        self.assertEqual(statuses[0].text, 'Content for tweet mock status 1')
+
+    def test_old_status_beyond_cutoff(self):
+        current_datetime = datetime.now(tz=timezone.utc)
+        fresh_status = generate_mock_status(2, created_at=current_datetime)
+        expired_datetime = current_datetime + timedelta(hours=-10)
+        old_status = generate_mock_status(1, created_at=expired_datetime)
+        api = MockAPI(statuses=[fresh_status, old_status])
+        timeline = classes.Timeline(username='testuser', timeframe=2)
+        timeline.api = api
+        timeline.earliest_id = 2
+        timeline.earliest_status = fresh_status
+        timeline.data['1'] = old_status
+        timeline.data['2'] = fresh_status
+        self.assertEqual(timeline.earliest_status.id, 2)
+        self.assertFalse(timeline._has_next_tweets())
+        self.assertEqual(timeline.earliest_status.id, 1)
 
     def test_load_statuses(self):
         status1 = generate_mock_status(1)
@@ -161,6 +207,27 @@ class TimelineTests(unittest.TestCase):
         self.assertTrue(len(list(timeline.data.values())), 1)
         self.assertEqual(timeline.data['1'].created_at.microsecond,
                          original_created_at.microsecond)
+
+    def test_load_status_with_reply_id(self):
+        original_user = generate_mock_user()
+        original_user.id = 2
+        original_user.screen_name = 'reply_user'
+        original_status = generate_mock_status(1, user=original_user)
+        child_status = generate_mock_status(2)
+        child_status.in_reply_to_status_id = 1
+        api = MockAPI([original_status, child_status])
+        timeline = classes.Timeline(api=api, username='testuser')
+        self.assertEqual(timeline.data['2'].origin.author_name, 'reply_user')
+
+    def test_load_status_with_reply_error(self):
+        child_status = generate_mock_status(2)
+        child_status.in_reply_to_status_id = 7
+        api = MockAPI([child_status])
+        out = StringIO()
+        sys.stdout = out
+        classes.Timeline(api=api, username='testuser')
+        output = out.getvalue().strip()
+        self.assertEqual(output, 'Error while fetching origin for tweet 2')
 
     def test_has_next_tweets_no_statuses(self):
         statuses = []
