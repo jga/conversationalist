@@ -6,7 +6,7 @@ import pytz
 import re
 import unittest
 from unittest.mock import Mock
-from conversationalist import classes, adapters
+from conversationalist import classes,adapters
 from .adapters import ConvoParticipationAdapter as ParticipationAdapter
 from .adapters import ConvoTextAdapter as TextAdapter
 
@@ -19,12 +19,13 @@ def generate_mock_user():
     return user
 
 
-def generate_mock_status(id=None, text=None, created_at=None):
+def generate_mock_status(id=None, text=None, created_at=None, user=None):
     status = Mock(spec=classes.Status)
     status.id = id
     status.text = text if text else "The text for mock status {0}".format(status.id)
     status.created_at = created_at if created_at else datetime.utcnow()
-    user = generate_mock_user()
+    if user is None:
+        user = generate_mock_user()
     status.author = user
     status.in_reply_to_status_id = None
     return status
@@ -57,7 +58,7 @@ def generate_mock_timeline_data(naive_dt=True, datetime_fixtures=None):
         status.id = len(mock_data) + 1
         status.text = "The text for mock status {0}".format(status.id)
         status.created_at = dt
-        status.author = 'test_author'
+        status.author = generate_mock_user()
         status.in_reply_to_status_id = None
         mock_data[str(status.id)] = status
     return mock_data
@@ -91,6 +92,21 @@ class MockAPI:
 
     def user_timeline(self, user, max_id=None):
         return self.statuses
+
+class StatusEncoderTests(unittest.TestCase):
+
+    def test_origin_encoding(self):
+        origin_user = generate_mock_user()
+        origin_user.id = 5
+        origin_user.screen_name = 'original_user'
+        origin_status = generate_mock_status(1, user=origin_user)
+        origin_status.text = 'Original status text'
+        child_status = generate_mock_status(2)
+        child_status.origin = origin_status
+        child_status.in_reply_to_status_id = 1
+        child_status_json =  json.loads(classes.StatusEncoder().encode(child_status))
+        self.assertEqual(child_status_json['origin']['author']['id'], 5, msg=child_status_json)
+
 
 
 class TimelineTests(unittest.TestCase):
@@ -266,6 +282,12 @@ class ConversationTests(unittest.TestCase):
                                             adapter=ParticipationAdapter )
         self.assertEqual(conversation.data['title'], 'Other Title')
 
+    def test_empty_timeline_interval(self):
+        conversation = classes.Conversation()
+        start, cutoff = conversation._get_timeline_interval()
+        self.assertEqual(start, None)
+        self.assertEqual(cutoff, None)
+
     def test_title_periods_initial_update(self):
         conversation = classes.Conversation(timeline=self.test_timeline,
                                             adapter=ParticipationAdapter)
@@ -389,6 +411,64 @@ class ConversationTests(unittest.TestCase):
         seconds = (clean_latest - unix_epoch).total_seconds()
         key = int(seconds)
         self.assertEqual(key, periods[6]['id'], msg=periods)
+
+    def test_load_timeline_json(self):
+        tests_path = os.path.dirname(__file__)
+        timeline_file_path = os.path.join(tests_path, 'json/timeline.json')
+        conversation = classes.Conversation(adapter=ParticipationAdapter)
+        conversation.load(timeline_file_path)
+        data = conversation.data
+        self.assertEqual(len(data['periods']), 5)
+        self.assertEqual(data['periods'][0]['subtitle'], 'Tuesday, February 23, 2010  8PM')
+        self.assertEqual(data['periods'][1]['subtitle'], 'Wednesday, February 24, 2010  5AM')
+        self.assertEqual(data['periods'][2]['subtitle'], 'Wednesday, February 24, 2010  6AM')
+        self.assertEqual(data['periods'][3]['subtitle'], 'Wednesday, February 24, 2010  7AM')
+        self.assertEqual(data['periods'][4]['subtitle'], 'Wednesday, February 24, 2010  8AM')
+        self.assertEqual(data['title'], 'Tick Tock')
+        self.assertEqual(data['nav'], ['1', '2', '3', '4', '5'])
+        self.assertTrue(isinstance(data['participation'], classes.Participation))
+        participation = data['participation']
+        self.assertEqual(participation.participants.keys(), {'test_author'}, msg=participation.participants)
+        participant = participation.participants['test_author']
+        self.assertEqual(participant.exchange_count, 5)
+
+    def test_load_timeline_json_central(self):
+        tests_path = os.path.dirname(__file__)
+        timeline_file_path = os.path.join(tests_path, 'json/timeline_central.json')
+        conversation = classes.Conversation(adapter=ParticipationAdapter)
+        conversation.load(timeline_file_path)
+        data = conversation.data
+        self.assertEqual(len(data['periods']), 5)
+        self.assertEqual(data['periods'][0]['subtitle'], 'Tuesday, February 23, 2010  8PM')
+        self.assertEqual(data['periods'][1]['subtitle'], 'Wednesday, February 24, 2010  5AM')
+        self.assertEqual(data['periods'][2]['subtitle'], 'Wednesday, February 24, 2010  6AM')
+        self.assertEqual(data['periods'][3]['subtitle'], 'Wednesday, February 24, 2010  7AM')
+        self.assertEqual(data['periods'][4]['subtitle'], 'Wednesday, February 24, 2010  8AM')
+        self.assertEqual(data['title'], 'Tick Tock')
+        self.assertEqual(data['nav'], ['1', '2', '3', '4', '5'])
+        self.assertTrue(isinstance(data['participation'], classes.Participation))
+        participation = data['participation']
+        self.assertEqual(participation.participants.keys(), {'test_author'}, msg=participation.participants)
+        participant = participation.participants['test_author']
+        self.assertEqual(participant.exchange_count, 5)
+
+
+class ParticipationTests(unittest.TestCase):
+    def test_ranked_profiles(self):
+        participation = classes.Participation()
+        busy_participant = classes.Participant('busy_participant', 'test.url.busy_participant')
+        busy_participant.exchange_count = 10
+        participation.participants[busy_participant.name] = busy_participant
+        quiet_participant = classes.Participant('quiet_participant', 'test.url.quiet_participant')
+        quiet_participant.exchange_count = 2
+        participation.participants[quiet_participant.name] = quiet_participant
+        inactive_participant = classes.Participant('inactive_participant', 'test.url.inactive_participant')
+        inactive_participant.exchange_count = 0
+        participation.participants[inactive_participant.name] = inactive_participant
+        ranked = participation.get_ranked_profiles()
+        self.assertEqual(ranked[0].name, 'busy_participant')
+        self.assertEqual(ranked[1].name, 'quiet_participant')
+        self.assertEqual(ranked[2].name, 'inactive_participant')
 
 
 
