@@ -139,7 +139,7 @@ def transform_with_participation_and_styles(conversation, style_words,
     for identifier, status in timeline_data.items():
         participation.add_tweet(status['author'])
         if status['origin']:
-            conversation.participation.add_tweet(status['origin']['author'])
+            participation.add_tweet(status['origin']['author'])
         if header_pattern:
             topic_header = find_topic_header(status, header_pattern, return_group)
             if topic_header:
