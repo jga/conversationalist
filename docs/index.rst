@@ -15,11 +15,77 @@ Contents:
    utils
 
 
+API setup
+---------
+
+When passing a tweepy API instance into ``make_story``, it must have the proper auth credentials. Specifically, for
+querying a user timeline, the following properties should be set.
+
+``access_token``
+
+The twitter API access token.
+
+``access_token_secret``
+
+The twitter API access token secret.
+
+``consumer_key``
+
+The twitter API consumer key.
+
+``consumer_secret``
+
+The twitter API consumer secret.
+
 Configuration
 -------------
 
 Expects ``~/conversationalist/json`` and ``~/conversationalist/content`` directories will be
 available for file-writing.
+
+The settings dict passed to ``make_story`` **MUST** include the following mappings:
+
+``api``
+
+Tweepy API instance with proper auth credentials set.
+
+``story_out``
+
+The file name and directory path to which the "story" HTML will be written.
+
+``template``
+
+The template that will process the conversation data.
+
+``timeline_out``
+
+File name and directory path where timeline JSON file will be saved.
+
+``username``
+
+The twitter user timeline that will be evaluated.
+
+``write``
+
+The function for writing out the "story" HTML page.
+
+The following entries **MAY** be included in the ``ini``:
+
+``adapter``
+
+An adapter for status data.
+
+``send_email``
+
+A function for email delivery of a fresh "story", which is an HTML page with tweet data.
+
+``timeframe``
+
+The number of hours in the past that the tweet search will cover.
+
+``title``
+
+A title for the "story"
 
 Testing
 -------
