@@ -1,177 +1,60 @@
-import base64
-import collections
-import json
-import os
-from datetime import datetime
-from jinja2 import Environment, FileSystemLoader
 import tweepy
-import pytz
-from dateutil.parser import parse
-from .classes import Conversation, Timeline, TimelineEncoder
-
-template_path = ''.join((os.path.dirname(os.path.abspath(__file__)), '/templates',))
-template_env = Environment(loader=FileSystemLoader(template_path))
+from .classes import Conversation, Timeline
 
 
-def format_datetime(value, pattern='%B %d, %Y %I:%M %p'):
-    return parse(value).strftime(pattern)
-
-
-def to_background_url(value):
-    background_ready = ''.join(("url('", value, "')",))
-    return background_ready
-
-
-def urlize_item_link(value):
-    urlized = ''.join(('item-', str(value)))
-    return urlized.lower()
-
-
-template_env.filters['datetime'] = format_datetime
-template_env.filters['urlize_item_link'] = urlize_item_link
-template_env.filters['to_background_url'] = to_background_url
-
-
-def write_story(path, conversation, template):
-    """
-
-    Args:
-        path:
-        conversation: A :class:`~.classes.Conversation` instance.
-        template: For example, 'tick_tock_body.html'
-    """
-    title = conversation.data['title'],
-    summaries = conversation.data['hourlies'],
-    participants = conversation.participation.get_ranked_profiles(),
-    navs = conversation.nav,
-    template = template_env.get_template(template)
-    output = template.render(title=title, summaries=summaries,
-                             participants=participants, nav_links=navs)
-    with open(path, "wb") as fh:
-        fh.write(output)
-
-
-def get_json_file_path(path, tz_name, file_name='conversationalist_data-'):
-    timezone = pytz.timezone(tz_name)
-    date_label = datetime.now(tz=timezone).strftime('%m%d%Y')
-    return ''.join((path, file_name, date_label,'.json'))
-
-
-def get_output_file_path(path, tz_name, file_name='conversationalist-'):
-    """
-
-    Args:
-        path:
-        tz_name: Such as 'America/Chicago'.
-        file_name: For example, 'ticktock-'.
-
-    Returns:
-
-    """
-    timezone = pytz.timezone(tz_name)
-    date_label = datetime.now(tz=timezone).strftime('%m%d%Y-%H%M')
-    output_file_name = ''.join((file_name, date_label,'.txt',))
-    return ''.join((path, output_file_name)), output_file_name
-
-
-def get_email_subject(subject, tz_name):
-    """
-
-    Args:
-        subject: For example, 'Tick Tock File - '.
-        tz_name: Such as 'America/Chicago'.
-
-    Returns:
-
-    """
-    timezone = pytz.timezone(tz_name)
-    date_label = datetime.now(tz=timezone).strftime('%m-%d-%Y %H:%M')
-    return ''.join((subject, date_label,))
-
-
-def is_valid_payload(payload):
-    keys = ['html', 'subject', 'text', 'to']
-    for k in keys:
-        if not k in payload:
-            return False
-    return True
-
-
-def with_encoded(attachment_path, attachment_name):
-    encoded_file = base64.b64encode(open(attachment_path, 'r').read())
-    attachment = {
-        'name': attachment_name,
-        'content': encoded_file,
-        'type': 'text/plain'
-    }
-    return attachment
-
-def send_conversation_page(email, output_file_path, output_file_name,
-                            settings, tz_name):
-    name = settings.get('name', email)
-    subject = get_email_subject(settings['email_subject'], tz_name)
-    project_name = settings.get('project_name', 'Tweet story')
-    payload = {
-        'subject': subject,
-        'html': '<p>{0} file attached.</p>'.format(project_name),
-        'text': '{0} file attached.'.format(project_name),
-        'to': [{'email': email, 'name': name, 'type': 'to'}],
-        'attachment_path': output_file_path,
-        'attachment_name': output_file_name
-    }
-    print('...sending email to: {0}'.format(email))
-    send_email = settings.get('send_email', None)
-    if isinstance(send_email, collections.Callable):
-        send_email(payload)
-
-
-def go(twitter_username, hours, settings):
+def make_story(settings):
     """
     Creates web page and data from a twitter account's stream.
 
-    After obtaining twitter api instance, a ``Timeline`` object
-    is instantiated. It's data is encoded into a JSON file. This
+    Function extracts needed settings. Then, after, btaining twitter api instance,
+    a ``Timeline`` object is instantiated. It's data is encoded into a JSON file. This
     allows portability for the timeline instance.
 
     The timeline's JSON is then consumed for the creation of a ``Conversation``
     instance.
 
+    The ``Conversation`` instance is passed along with a template file path location
+    and a file path for output to a ``write`` function.  The ``write`` function
+    takes care of usering conversation data to produce the HTML page that represents
+    the "story".
+
+    Finally, if an email handler was included in the settings, then that email
+    handler is called; it is passed the location of the just-produced HTML "story"
+    page, but it may choose to not use it/attach it.
+
     Args:
-        twitter_username (str): The targeted twitter account.
-        hours (int): How far back the stream will be explored.
         settings (dict): Configuration settings.
+
+    Returns:
+        str: The file path location of the generated web page.
     """
     print('Starting conversationalist. Getting tweets...')
-    tz_name = settings.get('tz_name', 'UTC')
-    auth = tweepy.OAuthHandler(settings['consumer_key'], settings['consumer_secret'])
-    auth.set_access_token(settings['access_token'], settings['access_token_secret'])
-    api = tweepy.API(auth)
-    timeline = Timeline(api, twitter_username, (hours * -1))
-    json_file_path = settings['data_path']
-    timeline.to_json(json_file_path)
-    conversation = Conversation()
-    conversation.load(json_file_path, settings)
-    output_file_path, output_file_name = get_output_file_path(settings['output_path'], tz_name)
+    adapter = settings.get('adapter')
+    api = settings['api']
+    timeline_json_output_file = settings['timeline_out']
+    timeframe_hours = int(settings.get('timeframe', 24))
+    title = settings.get('title')
+    twitter_username = settings['username']
+    write = settings['write']
+    timeline = Timeline(api, twitter_username, (timeframe_hours * -1))
+    timeline.to_json(timeline_json_output_file)
+    conversation = Conversation(title=title, adapter=adapter)
+    conversation.load(timeline_json_output_file)
     print('...writing content...')
-    write_story(output_file_path,
-                conversation,
-                settings['template'])
-    email = settings.get('email', None)
-    if email:
-        send_conversation_page(email,
-                           output_file_path,
-                           output_file_name,
-                           settings,
-                           tz_name)
+    page_location = write(conversation, settings['story_out'], settings['template'])
     print('...conversationalist done.')
+    return page_location
 
 
-def print_rate_limit_info(settings):
-    auth = tweepy.OAuthHandler(settings['consumer_key'], settings['consumer_secret'])
-    auth.set_access_token(settings['access_token'], settings['access_token_secret'])
-    api = tweepy.API(auth)
-    status = api.rate_limit_status()
-    for (k, v) in status['resources'].items():
-        if k == 'statuses':
-            for (k2, v2) in v.items():
-                print ('KEY: ', k2, ' VALUE: ', v2)
+def print_rate_limit_info(api):
+    """
+    Prints rate limit information for passed API instance.
+
+    Args:
+        api: A tweepy API instance.
+    """
+    info = api.rate_limit_status()
+    for (key, val) in info['resources'].items():
+        if key == 'statuses':
+            for (status_key, status_value) in val.items():
+                print ('KEY: ', status_key, ' VALUE: ', status_value)
