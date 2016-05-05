@@ -24,5 +24,5 @@ setup(
                            exclude=['tests', 'tests.*']),
     platforms=['Any'],
     url='https://github.com/jga/conversationalist',
-    version='0.1.0',
+    version='0.1.1',
 )
