@@ -32,6 +32,10 @@ def initialize_hourly_summary(start, cutoff):
     return hourly_summary
 
 
+def sort_statuses(statuses):
+    return sorted(statuses, key=lambda s: s['created_at'])
+
+
 def to_periods(hourly_summary):
     periods = []
     for iso_timestamp, statuses in hourly_summary.items():
@@ -47,7 +51,7 @@ def to_periods(hourly_summary):
                 'empty': empty,
                 'empty_message': message,
                 'subtitle': subtitle,
-                'statuses': statuses
+                'statuses': sort_statuses(statuses)
             }
             periods.append(hour_block)
     periods = sorted(periods, key=itemgetter('id'))
@@ -98,8 +102,9 @@ def get_style_classes(style_words, status):
                 word = word.replace(' ', '-')
                 style_matches.append(word)
     for m in set(style_matches):
-        style_classes = ''.join((style_classes, ' ', m, ))
-    return style_classes
+        style_classes = '{0} {1}'.format(style_classes, m)
+    return style_classes.strip()
+
 
 def transform_with_topic_headers(conversation, pattern, return_goup):
     start, cutoff = conversation._get_timeline_interval()
@@ -110,10 +115,15 @@ def transform_with_topic_headers(conversation, pattern, return_goup):
         if pattern:
             topic_header = find_topic_header(status, pattern, return_goup)
             if topic_header:
+                status['topic_header'] = topic_header
                 topic_headers.append(topic_header)
         created_with_no_minutes = parse(status['created_at']).replace(minute=0, second=0, microsecond=0)
         time_key = created_with_no_minutes.isoformat()
-        hourly_summary[time_key].insert(0, status)
+        if time_key in hourly_summary:
+            # statuses not sorted by time
+            hourly_summary[time_key].append(status)
+        else:
+            hourly_summary[time_key] = [status]
     nav = sorted(set(topic_headers))
     data = {
         'title': conversation.title,
@@ -143,12 +153,17 @@ def transform_with_participation_and_styles(conversation, style_words,
         if header_pattern:
             topic_header = find_topic_header(status, header_pattern, return_group)
             if topic_header:
+                status['topic_header'] = topic_header
                 topic_headers.append(topic_header)
         if style_words:
             status['style_classes'] = get_style_classes(style_words, status)
         created_with_no_minutes = parse(status['created_at']).replace(minute=0, second=0, microsecond=0)
         time_key = created_with_no_minutes.isoformat()
-        hourly_summary[time_key].insert(0, status)
+        if time_key in hourly_summary:
+            # statuses not sorted by time
+            hourly_summary[time_key].append(status)
+        else:
+            hourly_summary[time_key] = [status]
     nav = sorted(set(topic_headers))
     data = {
         'title': conversation.title,
@@ -184,6 +199,7 @@ class TopicHeaderAdapter:
     def convert(self):
         return transform_with_topic_headers(self.conversation, self.pattern, self.return_group)
 
+
 class TextReplaceAdapter:
     conversions = None
 
@@ -200,7 +216,11 @@ class TextReplaceAdapter:
                     status['text'].replace(original, replacement)
             created_with_no_minutes = parse(status['created_at']).replace(minute=0, second=0, microsecond=0)
             time_key = created_with_no_minutes.isoformat()
-            hourly_summary[time_key].insert(0, status)
+            if time_key in hourly_summary:
+                # statuses not sorted by time
+                hourly_summary[time_key].append(status)
+            else:
+                hourly_summary[time_key] = [status]
         data = {
             'title': self.conversation.title,
             'periods': to_periods(hourly_summary),
