@@ -1,5 +1,4 @@
 include README.rst
-include LICENSE
+include LICENSE.txt
 include setup.cfg
-recursive-include conversationalist/templates *
 recursive-exclude tests *

@@ -15,12 +15,7 @@ setup(
         'Intended Audience :: Developers',
         'Programming Language :: Python :: 3 :: Only'
     ],
-    entry_points={
-        'console_scripts': [
-            'conversationalist=conversationalist.main:run',
-        ],
-    },
-    install_requires=['Jinja2', 'pytz', 'python-dateutil', 'tweepy'],
+    install_requires=['pytz', 'python-dateutil', 'tweepy'],
     keywords="python twitter",
     license="MIT",
     long_description=get_readme(),
