@@ -1,4 +1,3 @@
-import tweepy
 from .classes import Conversation, Timeline
 
 
@@ -33,15 +32,16 @@ def make_story(settings):
     api = settings['api']
     timeline_json_output_file = settings['timeline_out']
     timeframe_hours = int(settings.get('timeframe', 24))
-    title = settings.get('title')
+    title = settings.get('title', 'Story')
     twitter_username = settings['username']
     write = settings['write']
     timeline = Timeline(api, twitter_username, (timeframe_hours * -1))
+    print("...saving Timeline as JSON file...")
     timeline.to_json(timeline_json_output_file)
     conversation = Conversation(title=title, adapter=adapter)
     conversation.load(timeline_json_output_file)
-    print('...writing content...')
-    page_location = write(conversation, settings['story_out'], settings['template'])
+    print("...writing story file...")
+    page_location = write(conversation, settings['story_out'])
     print('...conversationalist done.')
     return page_location
 
